@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+      content="width=device-width,initial-scale=1.0">
+
+<title>Hand Tracking</title>
+
+<style>
+html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#111;
+}
+
+video{
+    position:fixed;
+    inset:0;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    transform:scaleX(-1);
+    opacity:.25;
+}
+
+canvas{
+    position:fixed;
+    inset:0;
+}
+
+#info{
+    position:fixed;
+    top:10px;
+    left:10px;
+    z-index:10;
+    padding:10px 14px;
+    border-radius:12px;
+    background:#000b;
+    color:white;
+    font-family:Arial;
+    font-size:16px;
+}
+</style>
+</head>
+
+<body>
+
+<div id="info">Iniciando cámara...</div>
+
+<video id="camera"
+       autoplay
+       muted
+       playsinline></video>
+
+
+<!-- MediaPipe como scripts normales -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+<script type="module">
+
+import * as THREE from
+"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js";
+
+
+const video =
+document.getElementById("camera");
+
+const info =
+document.getElementById("info");
+
+
+/* =========================
+   THREE.JS
+========================= */
+
+const scene =
+new THREE.Scene();
+
+const camera3D =
+new THREE.PerspectiveCamera(
+    60,
+    innerWidth / innerHeight,
+    0.01,
+    100
+);
+
+camera3D.position.z = 3;
+
+
+const renderer =
+new THREE.WebGLRenderer({
+    antialias:true,
+    alpha:true
+});
+
+renderer.setSize(
+    innerWidth,
+    innerHeight
+);
+
+renderer.setPixelRatio(
+    Math.min(devicePixelRatio,2)
+);
+
+document.body.appendChild(
+    renderer.domElement
+);
+
+
+/* Luz */
+
+scene.add(
+    new THREE.HemisphereLight(
+        0xffffff,
+        0x444444,
+        2
+    )
+);
+
+
+/* =========================
+   MANO
+========================= */
+
+const hand =
+new THREE.Group();
+
+scene.add(hand);
+
+
+/* Palma */
+
+const palm =
+new THREE.Mesh(
+    new THREE.BoxGeometry(
+        .75,.22,.35
+    ),
+    new THREE.MeshStandardMaterial({
+        color:0xffc58a
+    })
+);
+
+hand.add(palm);
+
+
+/* Crear dedos */
+
+function makeFinger(
+    x,
+    y,
+    length
+){
+
+    const finger =
+    new THREE.Group();
+
+    finger.position.set(
+        x,
+        y,
+        0
+    );
+
+
+    const segment1 =
+    new THREE.Mesh(
+        new THREE.CapsuleGeometry(
+            .055,
+            length * .45,
+            4,
+            8
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0xffc58a
+        })
+    );
+
+
+    segment1.rotation.z =
+    Math.PI / 2;
+
+
+    const segment2 =
+    new THREE.Mesh(
+        new THREE.CapsuleGeometry(
+            .05,
+            length * .35,
+            4,
+            8
+        ),
+        new THREE.MeshStandardMaterial({
+            color:0xffc58a
+        })
+    );
+
+
+    segment2.position.x =
+    length * .4;
+
+    segment2.rotation.z =
+    Math.PI / 2;
+
+
+    finger.add(segment1);
+    finger.add(segment2);
+
+    hand.add(finger);
+
+    return finger;
+}
+
+
+/* Índice, medio, anular, meñique */
+
+const index =
+makeFinger(-.28,.15,.42);
+
+const middle =
+makeFinger(-.09,.18,.50);
+
+const ring =
+makeFinger(.10,.17,.47);
+
+const pinky =
+makeFinger(.28,.13,.40);
+
+
+/* Pulgar */
+
+const thumb =
+makeFinger(-.38,-.04,.34);
+
+
+/* =========================
+   MEDIAPIPE
+========================= */
+
+const hands =
+new Hands({
+    locateFile:(file)=>{
+        return
+        "https://cdn.jsdelivr.net/npm/@mediapipe/hands/"
+        + file;
+    }
+});
+
+
+hands.setOptions({
+
+    maxNumHands:1,
+
+    modelComplexity:1,
+
+    minDetectionConfidence:.6,
+
+    minTrackingConfidence:.6
+
+});
+
+
+/* =========================
+   RESULTADOS
+========================= */
+
+hands.onResults(
+function(results){
+
+    if(
+        !results.multiHandLandmarks ||
+        results.multiHandLandmarks.length === 0
+    ){
+
+        info.textContent =
+        "No detecto la mano";
+
+        return;
+    }
+
+
+    info.textContent =
+    "✋ MANO DETECTADA";
+
+
+    const p =
+    results.multiHandLandmarks[0];
+
+
+    /*
+       0 = muñeca
+
+       5 = índice base
+       8 = índice punta
+
+       9 = medio base
+       12 = medio punta
+
+       13 = anular base
+       16 = anular punta
+
+       17 = meñique base
+       20 = meñique punta
+    */
+
+
+    /* Posición de la mano */
+
+    hand.position.x =
+    -(p[0].x - .5) * 3;
+
+    hand.position.y =
+    -(p[0].y - .5) * 2;
+
+
+    /* Rotación aproximada */
+
+    const wrist = p[0];
+
+    const middleBase = p[9];
+
+    const dx =
+    middleBase.x - wrist.x;
+
+    const dy =
+    middleBase.y - wrist.y;
+
+    hand.rotation.z =
+    Math.atan2(dy,dx);
+
+
+    /* =====================
+       DETECTAR CIERRE
+    ===================== */
+
+    function distance(a,b){
+
+        const dx =
+        p[a].x - p[b].x;
+
+        const dy =
+        p[a].y - p[b].y;
+
+        return Math.sqrt(
+            dx*dx + dy*dy
+        );
+    }
+
+
+    function bend(base,tip){
+
+        const d =
+        distance(base,tip);
+
+        return THREE.MathUtils.clamp(
+            (d - .08) * 8,
+            0,
+            1
+        );
+    }
+
+
+    const i =
+    bend(5,8);
+
+    const m =
+    bend(9,12);
+
+    const r =
+    bend(13,16);
+
+    const q =
+    bend(17,20);
+
+
+    /*
+       Mano abierta:
+       dedos extendidos.
+
+       Mano cerrada:
+       dedos se doblan.
+    */
+
+    index.rotation.z =
+    (1-i) * -1.0;
+
+    middle.rotation.z =
+    (1-m) * -1.0;
+
+    ring.rotation.z =
+    (1-r) * -1.0;
+
+    pinky.rotation.z =
+    (1-q) * -1.0;
+
+
+    /* Pulgar */
+
+    const thumbDistance =
+    distance(4,8);
+
+    thumb.rotation.z =
+    THREE.MathUtils.clamp(
+        thumbDistance * 5,
+        -1,
+        1
+    );
+
+});
+
+
+/* =========================
+   CÁMARA
+========================= */
+
+async function startCamera(){
+
+    try{
+
+        const stream =
+        await navigator.mediaDevices
+        .getUserMedia({
+
+            video:{
+                facingMode:"user",
+                width:{
+                    ideal:640
+                },
+                height:{
+                    ideal:480
+                }
+            },
+
+            audio:false
+
+        });
+
+
+        video.srcObject =
+        stream;
+
+
+        await video.play();
+
+
+        info.textContent =
+        "Cámara lista";
+
+
+        processCamera();
+
+
+    }catch(error){
+
+        console.error(error);
+
+        info.textContent =
+        "❌ No se pudo abrir la cámara";
+
+    }
+
+}
+
+
+/* =========================
+   ENVIAR FRAMES
+========================= */
+
+let processing = false;
+
+async function processCamera(){
+
+    if(
+        video.readyState >= 2 &&
+        !processing
+    ){
+
+        processing = true;
+
+        try{
+
+            await hands.send({
+                image:video
+            });
+
+        }catch(error){
+
+            console.error(error);
+
+        }
+
+        processing = false;
+
+    }
+
+
+    requestAnimationFrame(
+        processCamera
+    );
+}
+
+
+/* =========================
+   RENDER
+========================= */
+
+function animate(){
+
+    requestAnimationFrame(
+        animate
+    );
+
+    renderer.render(
+        scene,
+        camera3D
+    );
+
+}
+
+animate();
+
+
+/* =========================
+   RESIZE
+========================= */
+
+addEventListener(
+"resize",
+function(){
+
+    camera3D.aspect =
+    innerWidth / innerHeight;
+
+    camera3D.updateProjectionMatrix();
+
+    renderer.setSize(
+        innerWidth,
+        innerHeight
+    );
+
+});
+
+
+/* ARRANCAR */
+
+startCamera();
+
+</script>
+
+</body>
+</html>
